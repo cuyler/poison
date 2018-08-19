@@ -21,7 +21,7 @@ defmodule Poison.ParserTest do
       parse!(".1")
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 2", fn ->
+    assert_raise ParseError, ~s(Cannot parse value at position 0: "1."), fn ->
       parse!("1.")
     end
 
@@ -64,11 +64,11 @@ defmodule Poison.ParserTest do
       parse!(~s("))
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 2", fn ->
+    assert_raise ParseError, "Unexpected end of input at position 3", fn ->
       parse!(~s("\\"))
     end
 
-    assert_raise ParseError, "Unexpected token at position 1: k", fn ->
+    assert_raise ParseError, "Unexpected token at position 2: k", fn ->
       parse!(~s("\\k"))
     end
 
@@ -76,7 +76,7 @@ defmodule Poison.ParserTest do
       parse!(<<34, 128, 34>>)
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 7", fn ->
+    assert_raise ParseError, "Unexpected end of input at position 9", fn ->
       parse!(~s("\\u2603\\"))
     end
 
@@ -97,13 +97,13 @@ defmodule Poison.ParserTest do
     end
 
     assert_raise ParseError,
-                 ~s(Cannot parse value at position 1: "\\\\ud8aa\\\\udcxx"),
+                 ~s(Cannot parse value at position 2: "\\\\ud8aa\\\\udcxx"),
                  fn ->
                    parse!(~s("\\ud8aa\\udcxx"))
                  end
 
     assert_raise ParseError,
-                 ~s(Cannot parse value at position 1: "\\\\uxxxx"),
+                 ~s(Cannot parse value at position 2: "\\\\uxxxx"),
                  fn ->
                    parse!(~s("\\uxxxx"))
                  end

@@ -1,9 +1,10 @@
 defmodule Poison.Mixfile do
   use Mix.Project
 
-  @version_path Path.join([__DIR__, "VERSION"])
-  @external_resource @version_path
-  @version @version_path |> File.read!() |> String.trim()
+  version_path = Path.join([__DIR__, "VERSION"])
+
+  @external_resource version_path
+  @version version_path |> File.read!() |> String.trim()
 
   def project do
     [
@@ -14,7 +15,15 @@ defmodule Poison.Mixfile do
       consolidate_protocols: not (Mix.env() in [:dev, :test]),
       deps: deps(),
       package: package(),
-      dialyzer: [ignore_warnings: "dialyzer.ignore-warnings"],
+      dialyzer: [
+        ignore_warnings: "dialyzer.ignore-warnings",
+        flags: [
+          :error_handling,
+          :race_conditions,
+          :underspecs,
+          :unmatched_returns
+        ]
+      ],
       test_coverage: [tool: ExCoveralls],
       preferred_cli_env: [
         coveralls: :test,

@@ -1,7 +1,8 @@
 defmodule Poison do
-  @readme_path [__DIR__, "..", "README.md"] |> Path.join() |> Path.expand()
-  @external_resource @readme_path
-  @moduledoc @readme_path |> File.read!() |> String.trim()
+  readme_path = [__DIR__, "..", "README.md"] |> Path.join() |> Path.expand()
+
+  @external_resource readme_path
+  @moduledoc readme_path |> File.read!() |> String.trim()
 
   alias Poison.{Decode, DecodeError, Decoder}
   alias Poison.{EncodeError, Encoder}
@@ -15,7 +16,7 @@ defmodule Poison do
   """
   @spec encode(Encoder.t(), keyword | Encoder.options()) ::
           {:ok, iodata}
-          | {:error, EncodeError.t()}
+          | {:error, Exception.t()}
   def encode(value, options \\ %{}) do
     {:ok, encode!(value, options)}
   rescue
@@ -54,10 +55,10 @@ defmodule Poison do
   """
   @spec decode(iodata) ::
           {:ok, Parser.t()}
-          | {:error, ParseError.t()}
+          | {:error, Exception.t()}
   @spec decode(iodata, keyword | Decoder.options()) ::
           {:ok, any}
-          | {:error, ParseError.t() | DecodeError.t()}
+          | {:error, Exception.t()}
   def decode(iodata, options \\ %{}) do
     {:ok, decode!(iodata, options)}
   rescue

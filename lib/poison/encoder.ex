@@ -116,6 +116,15 @@ defimpl Poison.Encoder, for: BitString do
 
   use Bitwise
 
+  @compile :inline
+  @compile {:inline_size, 150}
+  @compile {:inline_effort, 500}
+  @compile {:inline_unroll, 3}
+
+  # if Application.get_env(:poison, :native) do
+  @compile [:native, {:hipe, [:o3, :icode_ssa_struct_reuse, :rtl_ssapre, :use_indexing, :use_callgraph]}]
+  # end
+
   def encode("", _), do: "\"\""
 
   def encode(string, options) do

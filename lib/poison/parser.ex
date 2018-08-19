@@ -1,9 +1,9 @@
 defmodule Poison.ParseError do
-  @type t :: %__MODULE__{pos: integer, value: String.t()}
+  @type t :: %__MODULE__{pos: non_neg_integer, value: String.t()}
 
   alias Code.Identifier
 
-  defexception pos: 0, value: nil, rest: nil
+  defexception pos: 0, value: nil
 
   def message(%{value: "", pos: pos}) do
     "Unexpected end of input at position #{pos}"
@@ -14,7 +14,7 @@ defmodule Poison.ParseError do
   end
 
   def message(%{value: value, pos: pos}) when is_binary(value) do
-    start = pos - String.length(value)
+    start = max(0, pos - String.length(value))
     "Cannot parse value at position #{start}: #{inspect(value)}"
   end
 
@@ -37,11 +37,12 @@ defmodule Poison.Parser do
   """
 
   @compile :inline
-  @compile {:inline_size, 256}
+  @compile {:inline_size, 150}
 
-  if Application.get_env(:poison, :native) do
-    @compile [:native, {:hipe, [:o3]}]
-  end
+  # if Application.get_env(:poison, :native) do
+  @compile [:native, {:hipe, [:o3]}]
+  # @compile [:native, {:hipe, [{:ls_order, :inorder}, :o3, :bitlevel_binaries, :icode_multret, :icode_ssa_struct_reuse, :rtl_ssapre, :use_callgraph]}]
+  # end
 
   use Bitwise
 
@@ -57,11 +58,23 @@ defmodule Poison.Parser do
     end
   end
 
+  defmacrop syntax_error(value, pos) do
+    quote do
+      case unquote(value) do
+        <<token::utf8>> <> _ ->
+          raise ParseError, pos: unquote(pos), value: <<token::utf8>>
+        _ ->
+          raise ParseError, pos: unquote(pos), value: ""
+      end
+    end
+  end
+
   def parse!(iodata, options) do
-    string = IO.iodata_to_binary(iodata)
     keys = Map.get(options, :keys)
-    {rest, pos} = skip_whitespace(skip_bom(string), 0)
-    {value, pos, rest} = value(rest, pos, keys)
+    string = skip_bom(IO.iodata_to_binary(iodata))
+    size = byte_size(string)
+    {rest, pos} = skip_whitespace(string, 0)
+    {value, pos, rest} = value(rest, size, pos, keys)
 
     case skip_whitespace(rest, pos) do
       {"", _pos} -> value
@@ -69,76 +82,131 @@ defmodule Poison.Parser do
     end
   rescue
     ArgumentError ->
-      reraise %ParseError{value: iodata}, stacktrace()
+      reraise ParseError, [value: iodata], stacktrace()
   end
 
-  defp value("\"" <> rest, pos, _keys) do
-    string_continue(rest, pos + 1, [])
+  defp value("", _size, pos, _keys) do
+    syntax_error("", pos)
   end
 
-  defp value("{" <> rest, pos, keys) do
-    {rest, pos} = skip_whitespace(rest, pos + 1)
-    object_pairs(rest, pos, keys, [])
+  defp value(string, size, pos, keys) do
+    left = size - pos - 1
+    case string do
+      <<"\"", rest::binary-size(left)>> ->
+        string_continue(rest, size, pos + 1, [])
+      <<"{", rest::binary-size(left)>> ->
+        {rest, pos} = skip_whitespace(rest, pos + 1)
+        object_pairs(rest, size, pos, keys, [])
+      <<"[", rest::binary-size(left)>> ->
+        {rest, pos} = skip_whitespace(rest, pos + 1)
+        array_values(rest, size, pos, keys, [])
+      <<"n", rest::binary-size(left)>> ->
+        left = left - 3
+        case rest do
+          <<"ull", rest::binary-size(left)>> ->
+            {nil, pos + 4, rest}
+          other ->
+            syntax_error(other, pos + 1)
+        end
+      <<"t", rest::binary-size(left)>> ->
+        left = left - 3
+        case rest do
+          <<"rue", rest::binary-size(left)>> ->
+            {true, pos + 4, rest}
+          other ->
+            syntax_error(other, pos + 1)
+        end
+      <<"f", rest::binary-size(left)>> ->
+        left = left - 4
+        case rest do
+          <<"alse", rest::binary-size(left)>> ->
+            {false, pos + 5, rest}
+          other ->
+            syntax_error(other, pos + 1)
+        end
+      <<"-", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "-")
+      <<"0", rest::binary-size(left)>> ->
+        number_frac(rest, pos + 1, "0")
+      <<"1", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "1")
+      <<"2", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "2")
+      <<"3", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "3")
+      <<"4", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "4")
+      <<"5", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "5")
+      <<"6", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "6")
+      <<"7", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "7")
+      <<"8", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "8")
+      <<"9", rest::binary-size(left)>> ->
+        number_int(rest, pos + 1, "9")
+      _ ->
+        syntax_error(string, pos)
+    end
   end
-
-  defp value("[" <> rest, pos, keys) do
-    {rest, pos} = skip_whitespace(rest, pos + 1)
-    array_values(rest, pos, keys, [])
-  end
-
-  defp value("null" <> rest, pos, _keys), do: {nil, pos + 4, rest}
-  defp value("true" <> rest, pos, _keys), do: {true, pos + 4, rest}
-  defp value("false" <> rest, pos, _keys), do: {false, pos + 5, rest}
-
-  defp value(<<char, _::binary>> = string, pos, _keys)
-       when char in '-0123456789' do
-    number_start(string, pos)
-  end
-
-  defp value(other, pos, _keys), do: syntax_error(other, pos)
 
   ## Objects
 
-  defp object_pairs("\"" <> rest, pos, keys, acc) do
-    {name, pos, rest} = string_continue(rest, pos + 1, [])
+  defp object_pairs("\"" <> rest, size, pos, keys, acc) do
+    {name, pos, rest} = string_continue(rest, size, pos + 1, [])
+
+    {rest, start} = skip_whitespace(rest, pos)
+    left = size - start - 1
 
     {value, start, pos, rest} =
-      case skip_whitespace(rest, pos) do
-        {":" <> rest, start} ->
+      case rest do
+        <<":", rest::binary-size(left)>> ->
           {rest, pos} = skip_whitespace(rest, start + 1)
-          {value, pos, rest} = value(rest, pos, keys)
+          {value, pos, rest} = value(rest, size, pos, keys)
           {value, start, pos, rest}
 
-        {other, pos} ->
+        other ->
           syntax_error(other, pos)
       end
 
     acc = [{object_name(name, start, keys), value} | acc]
 
-    case skip_whitespace(rest, pos) do
-      {"," <> rest, pos} ->
-        {rest, pos} = skip_whitespace(rest, pos + 1)
-        object_pairs(rest, pos, keys, acc)
+    {rest, pos} = skip_whitespace(rest, pos)
+    left = size - pos - 1
 
-      {"}" <> rest, pos} ->
+    case rest do
+      <<",", rest::binary-size(left)>> ->
+        {rest, pos} = skip_whitespace(rest, pos + 1)
+        object_pairs(rest, size, pos, keys, acc)
+
+      <<"}", rest::binary-size(left)>> ->
         {:maps.from_list(acc), pos + 1, rest}
 
-      {other, pos} ->
+      other ->
         syntax_error(other, pos)
     end
   end
 
-  defp object_pairs("}" <> rest, pos, _, []) do
-    {:maps.new(), pos + 1, rest}
+  defp object_pairs(string, size, pos, _, []) do
+    left = size - pos - 1
+    case string do
+      <<"}", rest::binary-size(left)>> ->
+        {:maps.new(), pos + 1, rest}
+      other ->
+        syntax_error(other, pos)
+    end
   end
 
-  defp object_pairs(other, pos, _, _), do: syntax_error(other, pos)
+  defp object_pairs(other, _size, pos, _, _acc) do
+    syntax_error(other, pos)
+  end
 
   defp object_name(name, pos, :atoms!) do
     String.to_existing_atom(name)
   rescue
     ArgumentError ->
-      reraise %ParseError{value: name, pos: pos}, stacktrace()
+      reraise ParseError, [pos: pos, value: name], stacktrace()
   end
 
   defp object_name(name, _pos, :atoms), do: String.to_atom(name)
@@ -146,56 +214,47 @@ defmodule Poison.Parser do
 
   ## Arrays
 
-  defp array_values("]" <> rest, pos, _, []) do
-    {[], pos + 1, rest}
+  defp array_values(string, size, pos, keys, acc) do
+    left = size - pos - 1
+    case string do
+      <<"]", rest::binary-size(left)>> ->
+        {[], pos + 1, rest}
+      string ->
+        array_values_continue(string, size, pos, keys, acc)
+    end
   end
 
-  defp array_values(string, pos, keys, acc) do
-    {value, pos, rest} = value(string, pos, keys)
+  defp array_values_continue(string, size, pos, keys, acc) do
+    {value, pos, rest} = value(string, size, pos, keys)
 
     acc = [value | acc]
 
-    case skip_whitespace(rest, pos) do
-      {"," <> rest, pos} ->
-        {rest, pos} = skip_whitespace(rest, pos + 1)
-        array_values(rest, pos, keys, acc)
+    {rest, pos} = skip_whitespace(rest, pos)
+    left = size - pos - 1
 
-      {"]" <> rest, pos} ->
+    case rest do
+      <<",", rest::binary-size(left)>> ->
+        {rest, pos} = skip_whitespace(rest, pos + 1)
+        array_values_continue(rest, size, pos, keys, acc)
+
+      <<"]", rest::binary-size(left)>> ->
         {:lists.reverse(acc), pos + 1, rest}
 
-      {other, pos} ->
+      other ->
         syntax_error(other, pos)
     end
   end
 
   ## Numbers
 
-  defp number_start("-" <> rest, pos) do
-    case rest do
-      "0" <> rest -> number_frac(rest, pos + 2, ["-0"])
-      rest -> number_int(rest, pos + 1, [?-])
-    end
+  defp number_int(<<string::binary>>, pos, acc) do
+    {acc, pos, rest} = number_digits(string, pos, acc)
+    number_frac(rest, pos, acc)
   end
-
-  defp number_start("0" <> rest, pos) do
-    number_frac(rest, pos + 1, [?0])
-  end
-
-  defp number_start(string, pos) do
-    number_int(string, pos, [])
-  end
-
-  defp number_int(<<char, _::binary>> = string, pos, acc)
-       when char in '123456789' do
-    {digits, pos, rest} = number_digits(string, pos)
-    number_frac(rest, pos, [acc, digits])
-  end
-
-  defp number_int(other, pos, _), do: syntax_error(other, pos)
 
   defp number_frac("." <> rest, pos, acc) do
-    {digits, pos, rest} = number_digits(rest, pos + 1)
-    number_exp(rest, true, pos, [acc, ?., digits])
+    {acc, pos, rest} = number_digits(rest, pos + 1, acc <> ".")
+    number_exp(rest, true, pos, acc)
   end
 
   defp number_frac(string, pos, acc) do
@@ -203,73 +262,95 @@ defmodule Poison.Parser do
   end
 
   defp number_exp(<<e>> <> rest, frac, pos, acc) when e in 'eE' do
-    e = if frac, do: ?e, else: ".0e"
-
-    case rest do
-      "-" <> rest -> number_exp_continue(rest, frac, pos + 2, [acc, e, ?-])
-      "+" <> rest -> number_exp_continue(rest, frac, pos + 2, [acc, e])
-      rest -> number_exp_continue(rest, frac, pos + 1, [acc, e])
-    end
+    acc = if frac, do: acc, else: "#{acc}.0"
+    number_exp_sign(rest, frac, pos + 1, acc <> "e")
   end
 
   defp number_exp(string, frac, pos, acc) do
     {number_complete(acc, frac, pos), pos, string}
   end
 
-  defp number_exp_continue(rest, frac, pos, acc) do
-    {digits, pos, rest} = number_digits(rest, pos)
-    pos = if frac, do: pos, else: pos + 2
-    {number_complete([acc, digits], true, pos), pos, rest}
+  defp number_exp_sign("-" <> rest, frac, pos, acc) do
+    number_exp_continue(rest, frac, pos + 1, acc <> "-")
   end
 
-  defp number_complete(iolist, false, _pos) do
-    iolist |> IO.iodata_to_binary() |> String.to_integer()
+  defp number_exp_sign("+" <> rest, frac, pos, acc) do
+    number_exp_continue(rest, frac, pos + 1, acc)
   end
 
-  defp number_complete(iolist, true, pos) do
-    iolist |> IO.iodata_to_binary() |> String.to_float()
+  defp number_exp_sign(string, frac, pos, acc) do
+    number_exp_continue(string, frac, pos, acc)
+  end
+
+  defp number_exp_continue(<<string::binary>>, frac, pos, acc) do
+    case number_digits(string, pos, acc) do
+      {"", pos, rest} ->
+        syntax_error(rest, pos)
+      {acc, pos, rest} ->
+        pos = if frac, do: pos, else: pos + 2
+        {number_complete(acc, true, pos), pos, rest}
+    end
+  end
+
+  defp number_complete("-" <> rest, frac, pos) do
+    -number_complete(rest, frac, pos)
+  end
+
+  for x <- 0..99 do
+    defp number_complete(unquote("#{x}"), _frac, _pos) do
+      unquote(x)
+    end
+  end
+
+  defp number_complete(value, false, _pos) do
+    number_complete_int(value, 0, 0)
+  end
+
+  defp number_complete(value, true, pos) do
+    String.to_float(value)
   rescue
     ArgumentError ->
-      value = iolist |> IO.iodata_to_binary()
-      reraise %ParseError{pos: pos, value: value}, stacktrace()
+      reraise ParseError, [pos: pos, value: value], stacktrace()
   end
 
-  defp number_digits(<<char>> <> rest = string, pos)
-       when char in '0123456789' do
-    count = number_digits_count(rest, 1)
-    <<digits::binary-size(count), rest::binary>> = string
-    {digits, pos + count, rest}
+  defp number_complete_int(<<char>> <> rest, count, acc) do
+    number_complete_int(rest, count + 1, acc + (count * (char - ?0)))
   end
 
-  defp number_digits(other, pos), do: syntax_error(other, pos)
-
-  defp number_digits_count(<<char>> <> rest, acc) when char in '0123456789' do
-    number_digits_count(rest, acc + 1)
+  defp number_complete_int("", _count, acc) do
+    acc
   end
 
-  defp number_digits_count(_, acc), do: acc
+  defp number_digits(<<char>> <> rest, pos, acc) when char in '0123456789' do
+    number_digits(rest, pos + 1, acc <> <<char>>)
+  end
+
+  defp number_digits(rest, pos, acc) do
+    {acc, pos, rest}
+  end
 
   ## Strings
 
-  defp string_continue("\"" <> rest, pos, acc) do
-    {IO.iodata_to_binary(acc), pos + 1, rest}
-  end
+  defp string_continue("", _size, pos, _acc), do: syntax_error("", pos)
 
-  defp string_continue("\\" <> rest, pos, acc) do
-    string_escape(rest, pos, acc)
-  end
-
-  defp string_continue("", pos, _), do: syntax_error(nil, pos)
-
-  defp string_continue(string, pos, acc) do
-    {count, pos} = string_chunk_size(string, pos, 0)
-    <<chunk::binary-size(count), rest::binary>> = string
-    string_continue(rest, pos, [acc, chunk])
+  defp string_continue(<<string::binary>>, size, pos, acc) do
+    left = size - pos - 1
+    case string do
+      <<"\"", rest::binary-size(left)>> ->
+        {IO.iodata_to_binary(acc), pos + 1, rest}
+      <<"\\", rest::binary-size(left)>> ->
+        string_escape(rest, size, pos + 1, acc)
+      string ->
+        {count, pos} = string_chunk_size(string, pos, 0)
+        left = size - pos
+        <<chunk::binary-size(count), rest::binary-size(left)>> = string
+        string_continue(rest, size, pos, [acc | chunk])
+    end
   end
 
   for {seq, char} <- Enum.zip('"\\ntr/fb', '"\\\n\t\r/\f\b') do
-    defp string_escape(<<unquote(seq)>> <> rest, pos, acc) do
-      string_continue(rest, pos + 1, [acc, unquote(char)])
+    defp string_escape(<<unquote(seq)>> <> rest, size, pos, acc) do
+      string_continue(rest, size, pos + 1, [acc, unquote(char)])
     end
   end
 
@@ -282,30 +363,22 @@ defmodule Poison.Parser do
   # http://mathiasbynens.be/notes/javascript-encoding#surrogate-pairs
   defp string_escape(
          <<?u, a1, b1, c1, d1, "\\u", a2, b2, c2, d2>> <> rest,
+         size,
          pos,
          acc
        )
        when is_surrogate(a1, a2, b1, b2) do
-    hi = List.to_integer([a1, b1, c1, d1], 16)
-    lo = List.to_integer([a2, b2, c2, d2], 16)
+    {hi, lo} = get_surrogate_pair(<<a1, b1, c1, d1>>, <<a2, b2, c2, d2>>, pos)
     codepoint = 0x10000 + ((hi &&& 0x03FF) <<< 10) + (lo &&& 0x03FF)
-    string_continue(rest, pos + 11, [acc, <<codepoint::utf8>>])
-  rescue
-    ArgumentError ->
-      value = <<"\\u", a1, b1, c1, d1, "\\u", a2, b2, c2, d2>>
-      reraise %ParseError{pos: pos + 12, value: value}, stacktrace()
+    string_continue(rest, size, pos + 11, [acc | <<codepoint::utf8>>])
   end
 
-  defp string_escape(<<?u, seq::binary-size(4)>> <> rest, pos, acc) do
-    code = String.to_integer(seq, 16)
-    string_continue(rest, pos + 5, [acc, <<code::utf8>>])
-  rescue
-    ArgumentError ->
-      value = "\\u" <> seq
-      reraise %ParseError{pos: pos + 6, value: value}, stacktrace()
+  defp string_escape(<<?u, seq::binary-size(4)>> <> rest, size, pos, acc) do
+    code = get_codepoint(seq, pos)
+    string_continue(rest, size, pos + 5, [acc | <<code::utf8>>])
   end
 
-  defp string_escape(other, pos, _), do: syntax_error(other, pos)
+  defp string_escape(other, _size, pos, _), do: syntax_error(other, pos)
 
   defp string_chunk_size("\"" <> _, pos, acc), do: {acc, pos}
   defp string_chunk_size("\\" <> _, pos, acc), do: {acc, pos}
@@ -329,7 +402,29 @@ defmodule Poison.Parser do
   defp string_codepoint_size(codepoint) when codepoint < 0x10000, do: 3
   defp string_codepoint_size(_), do: 4
 
+  ## Characters
+
+  defp get_codepoint(seq, pos) do
+    String.to_integer(seq, 16)
+  rescue
+    ArgumentError ->
+      value = "\\u" <> seq
+      reraise ParseError, [pos: pos + 6, value: value], stacktrace()
+  end
+
+  defp get_surrogate_pair(hi, lo, pos) do
+    {String.to_integer(hi, 16), String.to_integer(lo, 16)}
+  rescue
+    ArgumentError ->
+      value = "\\u" <> hi <> "\\u" <> lo
+      reraise ParseError, [pos: pos + 12, value: value], stacktrace()
+  end
+
   ## Whitespace
+
+  defp skip_whitespace("    " <> rest, pos) do
+    skip_whitespace(rest, pos + 4)
+  end
 
   defp skip_whitespace(<<char>> <> rest, pos) when char in '\s\n\t\r' do
     skip_whitespace(rest, pos + 1)
@@ -345,15 +440,5 @@ defmodule Poison.Parser do
 
   defp skip_bom(string) do
     string
-  end
-
-  ## Errors
-
-  defp syntax_error(<<token::utf8>> <> _, pos) do
-    raise %ParseError{pos: pos, value: <<token::utf8>>}
-  end
-
-  defp syntax_error(_, pos) do
-    raise %ParseError{pos: pos, value: ""}
   end
 end
