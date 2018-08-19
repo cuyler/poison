@@ -5,7 +5,7 @@ defmodule Poison.ParserTest do
   alias Poison.ParseError
 
   test "numbers" do
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "Unexpected token at position 1: -", fn ->
       parse!("-")
     end
 
