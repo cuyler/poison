@@ -60,9 +60,10 @@ defmodule Poison.Mixfile do
   # Type "mix help deps" for more examples and options
   defp deps do
     [
-      {:dialyxir, "~> 0.5", only: :dev, runtime: false},
+      {:decimal, "~> 1.6"},
+      {:dialyxir, "~> 1.0.0-rc", only: :dev, runtime: false},
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},
-      {:excoveralls, "~> 0.9", only: :test},
+      {:excoveralls, "~> 0.10", only: :test},
       {:benchee, "~> 0.13", only: :bench},
       {:benchee_json, "~> 0.5", only: :bench},
       {:benchee_html, "~> 0.5", only: :bench},

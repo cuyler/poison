@@ -69,11 +69,15 @@ defmodule Poison.Parser do
     end
   end
 
-  def parse!(iodata, options) do
+  def parse!(iodata, options) when not is_binary(iodata) do
+    iodata |> IO.iodata_to_binary() |> parse!(options)
+  end
+
+  def parse!(string, options) do
     keys = Map.get(options, :keys)
-    string = skip_bom(IO.iodata_to_binary(iodata))
     size = byte_size(string)
-    {rest, pos, left} = skip_whitespace(string, 0, size)
+    {rest, left} = skip_bom(string, size)
+    {rest, pos, left} = skip_whitespace(rest, 0, left)
     {value, pos, left, rest} = value(rest, pos, left, keys)
 
     case skip_whitespace(rest, pos, left) do
@@ -82,7 +86,7 @@ defmodule Poison.Parser do
     end
   rescue
     ArgumentError ->
-      reraise ParseError, [value: iodata], stacktrace()
+      reraise ParseError, [value: string], stacktrace()
   end
 
   defp value("", pos, _left, _keys) do
@@ -125,27 +129,27 @@ defmodule Poison.Parser do
             syntax_error(other, pos + 1)
         end
       <<"-", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "-")
+        number_int(rest, pos + 1, left, {-1, 0, 0})
       <<"0", rest::binary-size(left)>> ->
-        number_frac(rest, pos + 1, left, "0")
+        number_frac(rest, pos + 1, left, {1, 0, 0})
       <<"1", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "1")
+        number_int(rest, pos + 1, left, {1, 1, 0})
       <<"2", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "2")
+        number_int(rest, pos + 1, left, {1, 2, 0})
       <<"3", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "3")
+        number_int(rest, pos + 1, left, {1, 3, 0})
       <<"4", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "4")
+        number_int(rest, pos + 1, left, {1, 4, 0})
       <<"5", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "5")
+        number_int(rest, pos + 1, left, {1, 5, 0})
       <<"6", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "6")
+        number_int(rest, pos + 1, left, {1, 6, 0})
       <<"7", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "7")
+        number_int(rest, pos + 1, left, {1, 7, 0})
       <<"8", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "8")
+        number_int(rest, pos + 1, left, {1, 8, 0})
       <<"9", rest::binary-size(left)>> ->
-        number_int(rest, pos + 1, left, "9")
+        number_int(rest, pos + 1, left, {1, 9, 0})
       _ ->
         syntax_error(string, pos)
     end
@@ -188,7 +192,7 @@ defmodule Poison.Parser do
     end
   end
 
-  defp object_pairs(string, pos, left, _, []) do
+  defp object_pairs(string, pos, left, _keys, []) do
     left = left - 1
     case string do
       <<"}", rest::binary-size(left)>> ->
@@ -247,92 +251,86 @@ defmodule Poison.Parser do
 
   ## Numbers
 
-  defp number_int(<<string::binary>>, pos, left, acc) do
-    case number_digits(string, pos, left, acc) do
-      {"-", pos, _left, _rest} ->
-        syntax_error("-", pos)
-      {acc, pos, left, rest} ->
-        number_frac(rest, pos, left, acc)
+  defp number_int(<<string::binary>>, start, left, {sign, coef, exp}) do
+    {coef, pos, left, rest} = number_digits(string, start, left, coef)
+    case {sign, pos} do
+      {-1, ^start} ->
+        syntax_error("", pos)
+      {sign, pos} ->
+        number_frac(rest, pos, left, {sign, coef, exp})
     end
   end
 
-  defp number_frac("." <> rest, pos, left, acc) do
-    case number_digits(rest, pos + 1, left - 1, acc <> ".") do
-      {"", pos, _left, _rest} ->
+  defp number_frac("." <> rest, pos, left, {sign, coef, exp}) do
+    start = pos + 1
+    case number_digits(rest, start, left - 1, coef) do
+      {_coef, ^start, _left, _rest} ->
         syntax_error("", pos)
-      {acc, pos, left, rest} ->
-        number_exp(rest, true, pos, left, acc)
+      {coef, pos, left, rest} ->
+        exp = exp - (pos - start)
+        number_exp(rest, pos, left, {sign, coef, exp})
     end
   end
 
   defp number_frac(string, pos, left, acc) do
-    number_exp(string, false, pos, left, acc)
+    number_exp(string, pos, left, acc)
   end
 
-  defp number_exp(<<e>> <> rest, frac, pos, left, acc) when e in 'eE' do
-    acc = if frac, do: acc, else: "#{acc}.0"
-    number_exp_sign(rest, frac, pos + 1, left - 1, acc <> "e")
+  defp number_exp(<<e>> <> rest, pos, left, {sign, coef, exp}) when e in 'eE' do
+    {value, pos, left, rest} = number_exp_continue(rest, pos + 1, left - 1)
+    {number_complete(sign, coef, exp + value, pos), pos, left, rest}
   end
 
-  defp number_exp(string, frac, pos, left, acc) do
-    {number_complete(acc, frac, pos), pos, left, string}
+  defp number_exp(string, pos, left, {sign, coef, exp}) do
+    {number_complete(sign, coef, exp, pos), pos, left, string}
   end
 
-  defp number_exp_sign("-" <> rest, frac, pos, left, acc) do
-    number_exp_continue(rest, frac, pos + 1, left - 1, acc <> "-")
+  defp number_exp_continue("-" <> rest, pos, left) do
+    {exp, pos, left, rest} = number_exp_digits(rest, pos + 1, left - 1)
+    {-exp, pos, left, rest}
   end
 
-  defp number_exp_sign("+" <> rest, frac, pos, left, acc) do
-    number_exp_continue(rest, frac, pos + 1, left - 1, acc)
+  defp number_exp_continue("+" <> rest, pos, left) do
+    number_exp_digits(rest, pos + 1, left - 1)
   end
 
-  defp number_exp_sign(string, frac, pos, left, acc) do
-    number_exp_continue(string, frac, pos, left, acc)
+  defp number_exp_continue(string, pos, left) do
+    number_exp_digits(string, pos, left)
   end
 
-  defp number_exp_continue("", _frac, pos, _left, _acc), do: syntax_error("", pos)
+  defp number_exp_digits("", pos, _left), do: syntax_error("", pos)
 
-  defp number_exp_continue(<<string::binary>>, frac, pos, left, acc) do
-    case number_digits(string, pos, left, acc) do
-      {"", pos, _left, _rest} ->
+  defp number_exp_digits(<<string::binary>>, pos, left) do
+    case number_digits(string, pos, left, 0) do
+      {_exp, ^pos, _left, _rest} ->
         syntax_error("", pos)
-      {acc, pos, left, rest} ->
-        pos = if frac, do: pos, else: pos + 2
-        {number_complete(acc, true, pos), pos, left, rest}
+      {exp, pos, left, rest} ->
+        {exp, pos, left, rest}
     end
   end
 
-  defp number_complete("-" <> rest, frac, pos) do
-    -number_complete(rest, frac, pos)
+  defp number_complete(sign, coef, 0, _pos) do
+    sign * coef
   end
 
-  for x <- 0..99 do
-    defp number_complete(unquote("#{x}"), _frac, _pos) do
-      unquote(x)
-    end
-  end
-
-  defp number_complete(value, false, _pos) do
-    number_complete_int(value, 0, 0)
-  end
-
-  defp number_complete(value, true, pos) do
-    String.to_float(value)
+  defp number_complete(sign, coef, exp, pos) do
+    1.0 * sign * coef * pow10(exp)
   rescue
-    ArgumentError ->
+    ArithmeticError ->
+      value = "#{sign * coef}e#{exp}"
       reraise ParseError, [pos: pos, value: value], stacktrace()
   end
 
-  defp number_complete_int(<<char>> <> rest, count, acc) do
-    number_complete_int(rest, count + 1, acc + (count * (char - ?0)))
-  end
+  Enum.reduce(0..16, 1, fn n, acc ->
+    defp pow10(unquote(n)), do: unquote(acc)
+    acc * 10
+  end)
 
-  defp number_complete_int("", _count, acc) do
-    acc
-  end
+  defp pow10(n) when n > 16, do: pow10(16) * pow10(n - 16)
+  defp pow10(n) when n < 0, do: 1 / pow10(-n)
 
   defp number_digits(<<char>> <> rest, pos, left, acc) when char in '0123456789' do
-    number_digits(rest, pos + 1, left - 1, acc <> <<char>>)
+    number_digits(rest, pos + 1, left - 1, acc * 10 + (char - ?0))
   end
 
   defp number_digits(rest, pos, left, acc) do
@@ -360,7 +358,7 @@ defmodule Poison.Parser do
 
   for {seq, char} <- Enum.zip('"\\ntr/fb', '"\\\n\t\r/\f\b') do
     defp string_escape(<<unquote(seq)>> <> rest, pos, left, acc) do
-      string_continue(rest, pos + 1, left - 1, [acc, unquote(char)])
+      string_continue(rest, pos + 1, left - 1, [acc | unquote(<<char>>)])
     end
   end
 
@@ -384,14 +382,14 @@ defmodule Poison.Parser do
   end
 
   defp string_escape(<<?u, seq::binary-size(4)>> <> rest, pos, left, acc) do
-    code = get_codepoint(seq, pos)
-    string_continue(rest, pos + 5, left - 5, [acc | <<code::utf8>>])
+    codepoint = get_codepoint(seq, pos)
+    string_continue(rest, pos + 5, left - 5, [acc | <<codepoint::utf8>>])
   end
 
   defp string_escape(other, pos, _left, _acc), do: syntax_error(other, pos)
 
-  defp string_chunk_size("\"" <> _, pos, acc), do: {acc, pos}
-  defp string_chunk_size("\\" <> _, pos, acc), do: {acc, pos}
+  defp string_chunk_size("\"" <> _rest, pos, acc), do: {acc, pos}
+  defp string_chunk_size("\\" <> _rest, pos, acc), do: {acc, pos}
 
   # Control Characters (http://seriot.ch/parsing_json.php#25)
   defp string_chunk_size(<<char>> <> _rest, pos, _acc) when char <= 0x1F do
@@ -444,11 +442,11 @@ defmodule Poison.Parser do
 
   # https://tools.ietf.org/html/rfc7159#section-8.1
   # https://en.wikipedia.org/wiki/Byte_order_mark#UTF-8
-  defp skip_bom(<<0xEF, 0xBB, 0xBF>> <> rest) do
-    rest
+  defp skip_bom(<<0xEF, 0xBB, 0xBF>> <> rest, size) do
+    {rest, size - 3}
   end
 
-  defp skip_bom(string) do
-    string
+  defp skip_bom(string, size) do
+    {string, size}
   end
 end
