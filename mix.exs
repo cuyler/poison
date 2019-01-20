@@ -12,7 +12,9 @@ defmodule Poison.Mixfile do
       version: @version,
       elixir: "~> 1.6",
       description: "An incredibly fast, pure Elixir JSON library",
+      start_permanent: Mix.env() == :prod,
       consolidate_protocols: not (Mix.env() in [:dev, :test]),
+      elixirc_paths: elixirc_paths(),
       deps: deps(),
       package: package(),
       dialyzer: [
@@ -35,9 +37,7 @@ defmodule Poison.Mixfile do
     ]
   end
 
-  # Configuration for the OTP application
-  #
-  # Type "mix help compile.app" for more information
+  # Run "mix help compile.app" to learn about applications.
   def application do
     # Specify extra applications you'll use from Erlang/Elixir
     spec = [extra_applications: []]
@@ -49,24 +49,26 @@ defmodule Poison.Mixfile do
     end
   end
 
-  # Dependencies can be Hex packages:
-  #
-  #   {:my_dep, "~> 0.3.0"}
-  #
-  # Or git/path repositories:
-  #
-  #   {:my_dep, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
-  #
-  # Type "mix help deps" for more examples and options
+  defp elixirc_paths() do
+    paths = ["lib"]
+
+    if Mix.env() == :profile do
+      [paths | "profile"]
+    else
+      paths
+    end
+  end
+
+  # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:decimal, "~> 1.6"},
+      {:decimal, "~> 1.7", optional: true},
       {:dialyxir, "~> 1.0.0-rc", only: :dev, runtime: false},
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},
       {:excoveralls, "~> 0.10", only: :test},
-      {:benchee, "~> 0.13", only: :bench},
-      {:benchee_json, "~> 0.5", only: :bench},
-      {:benchee_html, "~> 0.5", only: :bench},
+      {:benchee, "~> 0.14", only: :bench},
+      {:benchee_json, "~> 0.6", only: :bench},
+      {:benchee_html, "~> 0.6", only: :bench},
       {:jason, "~> 1.1", only: [:test, :bench]},
       {:exjsx, "~> 4.0", only: :bench},
       {:tiny, "~> 1.0", only: :bench},

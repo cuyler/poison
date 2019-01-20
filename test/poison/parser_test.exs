@@ -5,42 +5,42 @@ defmodule Poison.ParserTest do
   alias Poison.ParseError
 
   test "numbers" do
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "unexpected end of input at position 1", fn ->
       parse!("-")
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "unexpected end of input at position 1", fn ->
       parse!("--1")
     end
 
-    assert_raise ParseError, "Unexpected token at position 1: 1", fn ->
+    assert_raise ParseError, "unexpected token at position 1: 1", fn ->
       parse!("01")
     end
 
-    assert_raise ParseError, "Unexpected token at position 0: .", fn ->
+    assert_raise ParseError, "unexpected token at position 0: .", fn ->
       parse!(".1")
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "unexpected end of input at position 2", fn ->
       parse!("1.")
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 2", fn ->
+    assert_raise ParseError, "unexpected end of input at position 2", fn ->
       parse!("1e")
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 5", fn ->
+    assert_raise ParseError, "unexpected end of input at position 5", fn ->
       parse!("1.0e+")
     end
 
     # assert_raise ParseError,
-    #              ~s(Cannot parse value at position 0: "100e-999"),
+    #              ~s(cannot parse value at position 0: "100e-999"),
     #              fn ->
     #                parse!("100e-999")
     #              end
 
     # assert_raise ParseError,
-    #              ~s(Cannot parse value at position 0: "1000e-1000"),
+    #              ~s(cannot parse value at position 0: "1000e-1000"),
     #              fn ->
     #                parse!("100.0e-999")
     #              end
@@ -62,54 +62,56 @@ defmodule Poison.ParserTest do
     assert parse!("0.1e-1") == 0.1e-1
     assert parse!("99.99e99") == 99.99e99
     # assert parse!("-99.99e-99") == -99.99e-99
+
+    # credo:disable-for-next-line Credo.Check.Readability.LargeNumbers
     assert parse!("123456789.123456789e123") == 1.2345678912345678e131
   end
 
   test "strings" do
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "unexpected end of input at position 1", fn ->
       parse!(~s("))
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 3", fn ->
+    assert_raise ParseError, "unexpected end of input at position 3", fn ->
       parse!(~s("\\"))
     end
 
-    assert_raise ParseError, "Unexpected token at position 2: k", fn ->
+    assert_raise ParseError, "unexpected token at position 2: k", fn ->
       parse!(~s("\\k"))
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "unexpected end of input at position 1", fn ->
       parse!(<<34, 128, 34>>)
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 9", fn ->
+    assert_raise ParseError, "unexpected end of input at position 9", fn ->
       parse!(~s("\\u2603\\"))
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 39", fn ->
+    assert_raise ParseError, "unexpected end of input at position 39", fn ->
       parse!(~s("Here's a snowman for you: ☃. Good day!))
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 2", fn ->
+    assert_raise ParseError, "unexpected end of input at position 2", fn ->
       parse!(~s("𝄞))
     end
 
-    assert_raise ParseError, "Unexpected token at position 0: á", fn ->
+    assert_raise ParseError, "unexpected token at position 0: á", fn ->
       parse!(~s(á))
     end
 
-    assert_raise ParseError, "Unexpected token at position 0: \\x1F", fn ->
+    assert_raise ParseError, "unexpected token at position 0: \\x1F", fn ->
       parse!(~s(\u001F))
     end
 
     assert_raise ParseError,
-                 ~s(Cannot parse value at position 2: "\\\\ud8aa\\\\udcxx"),
+                 ~s(cannot parse value at position 2: "\\\\ud8aa\\\\udcxx"),
                  fn ->
                    parse!(~s("\\ud8aa\\udcxx"))
                  end
 
     assert_raise ParseError,
-                 ~s(Cannot parse value at position 2: "\\\\uxxxx"),
+                 ~s(cannot parse value at position 2: "\\\\uxxxx"),
                  fn ->
                    parse!(~s("\\uxxxx"))
                  end
@@ -124,19 +126,19 @@ defmodule Poison.ParserTest do
   end
 
   test "objects" do
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "unexpected end of input at position 1", fn ->
       parse!("{")
     end
 
-    assert_raise ParseError, "Unexpected token at position 1: ,", fn ->
+    assert_raise ParseError, "unexpected token at position 1: ,", fn ->
       parse!("{,")
     end
 
-    assert_raise ParseError, "Unexpected token at position 6: }", fn ->
+    assert_raise ParseError, "unexpected token at position 6: }", fn ->
       parse!(~s({"foo"}))
     end
 
-    assert_raise ParseError, "Unexpected token at position 14: }", fn ->
+    assert_raise ParseError, "unexpected token at position 14: }", fn ->
       parse!(~s({"foo": "bar",}))
     end
 
@@ -151,15 +153,15 @@ defmodule Poison.ParserTest do
   end
 
   test "arrays" do
-    assert_raise ParseError, "Unexpected end of input at position 1", fn ->
+    assert_raise ParseError, "unexpected end of input at position 1", fn ->
       parse!("[")
     end
 
-    assert_raise ParseError, "Unexpected token at position 1: ,", fn ->
+    assert_raise ParseError, "unexpected token at position 1: ,", fn ->
       parse!("[,")
     end
 
-    assert_raise ParseError, "Unexpected token at position 3: ]", fn ->
+    assert_raise ParseError, "unexpected token at position 3: ]", fn ->
       parse!("[1,]")
     end
 
@@ -170,11 +172,11 @@ defmodule Poison.ParserTest do
   end
 
   test "whitespace" do
-    assert_raise ParseError, "Unexpected end of input at position 0", fn ->
+    assert_raise ParseError, "unexpected end of input at position 0", fn ->
       parse!("")
     end
 
-    assert_raise ParseError, "Unexpected end of input at position 4", fn ->
+    assert_raise ParseError, "unexpected end of input at position 4", fn ->
       parse!("    ")
     end
 
@@ -195,7 +197,7 @@ defmodule Poison.ParserTest do
     hash = :erlang.phash2(:crypto.strong_rand_bytes(8))
 
     assert_raise ParseError,
-                 ~s(Cannot parse value at position 3: "key#{hash}"),
+                 ~s(cannot parse value at position 3: "key#{hash}"),
                  fn ->
                    parse!(~s({"key#{hash}": null}), %{keys: :atoms!})
                  end
@@ -204,7 +206,32 @@ defmodule Poison.ParserTest do
     assert parse!(~s({"foo": "bar"}), %{keys: :atoms}) == %{foo: "bar"}
   end
 
-  defp parse!(iodata) do
-    parse!(iodata, %{})
+  describe "JSONTestSuite" do
+    root = Path.expand(Path.join(__DIR__, "../../vendor/JSONTestSuite/test_parsing"))
+
+    for path <- Path.wildcard("#{root}/y_*.json") do
+      file = Path.basename(path, ".json")
+
+      test "#{file} passes" do
+        data = File.read!(unquote(path))
+        assert {:ok, _} = parse(data)
+      end
+    end
+
+    for path <- Path.wildcard("#{root}/n_*.json") do
+      file = Path.basename(path, ".json")
+
+      test "#{file} fails" do
+        data = File.read!(unquote(path))
+        assert_raise ParseError, fn -> parse!(data) end
+      end
+    end
+  end
+
+  defp parse(iodata, options \\ %{}) do
+    {:ok, parse!(iodata, options)}
+  rescue
+    exception ->
+      {:error, exception}
   end
 end
